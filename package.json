@@ -1,0 +1,17 @@
+{
+	"name": "observer",
+	"description": "A simple filesystem observer",
+	"version": "0.0.1",
+	"author": {
+		"name": "Jason Cheatham",
+		"email": "j.cheatham@gmail.com"
+	},
+	"repository": {
+		"type": "git",
+		"url": "http://github.com/jason0x43/node-observer.git"
+	},
+	"main": "./index.js",
+	"engines" : {
+		"node" : ">=0.8.0"
+	}
+}
