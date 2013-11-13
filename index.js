@@ -12,7 +12,10 @@ function createHandler(dir, observer) {
 	}
 
 	return function (evt, path) {
+		var eventType;
+
 		path = dir + '/' + path;
+
 		if (evt === 'rename') {
 			fs.stat(path, function (err, stat) {
 				if (err) {
@@ -35,27 +38,33 @@ function createHandler(dir, observer) {
 }
 
 
+function Observer() {
+	this.watchers = {};
+	this.watched = {};
+}
+util.inherits(Observer, EventEmitter);
+
+Observer.prototype.emit = function emit(eventType, path) {
+	Observer.super_.prototype.emit.call(this, eventType, path);
+	Observer.super_.prototype.emit.call(this, 'event', eventType, path);
+};
+
+Observer.prototype.close = function close() {
+	for (var i in this.watchers) {
+		this.watchers[i].close();
+	}
+	this.watchers = {};
+	this.watched = {};
+};
+
+
 exports.observe = function observe(dir) {
 	var watchers = {},
 		watched = {},
-		observer = {
+		observer = new Observer({
 			watchers: watchers,
-			watched: watched,
-			emitter: new EventEmitter(),
-			on: function () {
-				return this.emitter.on.apply(this.emitter, arguments);
-			},
-			emit: function () {
-				return this.emitter.emit.apply(this.emitter, arguments);
-			},
-			close: function () {
-				for (var i in watchers) {
-					this.watchers.i.close();
-				}
-				this.watchers = {};
-				this.watched = {};
-			}
-		};
+			watched: watched
+		});
 
 	watchers[dir] = fs.watch(dir, createHandler(dir, observer));
 
