@@ -1,52 +1,59 @@
 var fs = require('fs'),
 	util = require('util'),
+	path = require('path'),
 	format = util.format,
 	error = util.error,
 	log = util.log,
 	EventEmitter = require('events').EventEmitter;
 
 
-function createHandler(dir, observer) {
-	if (!dir) {
-		throw new TypeError('a valid directory is required');
-	}
-
-	return function (evt, path) {
-		var eventType;
-
-		path = dir + '/' + path;
-
-		if (evt === 'rename') {
-			fs.stat(path, function (err, stat) {
-				if (err) {
-					if (observer.watchers[path]) {
-						observer.watchers[path].close();
-						delete observer.watchers[path];
-					}
-					observer.emit('remove', path);
-				} else {
-					if (stat.isDirectory() && !observer.watchers[path]) {
-						observer.watchers[path] = fs.watch(path, createHandler(path, observer));
-					}
-					observer.emit('add', path);
-				}
-			});
-		} else {
-			observer.emit('change', path);
-		}
-	};
-}
-
-
-function Observer() {
+function Observer(options) {
 	this.watchers = {};
-	this.watched = {};
+	this.watching = {};
+	this.excludes = (options && options.excludes) || [];
 }
 util.inherits(Observer, EventEmitter);
 
-Observer.prototype.emit = function emit(eventType, path) {
-	Observer.super_.prototype.emit.call(this, eventType, path);
-	Observer.super_.prototype.emit.call(this, 'event', eventType, path);
+Observer.prototype.observe = function (dir) {
+	var self = this;
+
+	if (this._isExcluded(dir)) {
+		log('Skipping excluded dir ' + dir);
+		return;
+	}
+
+	this.watchers[dir] = fs.watch(dir, this._createHandler(dir));
+	this.watching[dir] = true;
+
+	fs.readdir(dir, function (err, list) {
+		if (err) {
+			error('Error reading ' + dir);
+			return;
+		}
+
+		list.forEach(function (name) {
+			name = path.join(dir, name);
+			fs.stat(name, function (err, stat) {
+				if (err) {
+					error('Error accessing ' + name);
+					return;
+				} else {
+					if (stat.isDirectory()) {
+						self.observe(name);
+					} else {
+						self.watching[name] = true;
+					}
+				}
+			});
+		});
+	});
+
+	return this;
+};
+
+Observer.prototype.emit = function emit(eventType, name) {
+	Observer.super_.prototype.emit.call(this, eventType, name);
+	Observer.super_.prototype.emit.call(this, 'change', eventType, name);
 };
 
 Observer.prototype.close = function close() {
@@ -54,40 +61,65 @@ Observer.prototype.close = function close() {
 		this.watchers[i].close();
 	}
 	this.watchers = {};
-	this.watched = {};
+	this.watching = {};
 };
 
+Observer.prototype._isExcluded = function _isExcluded(name) {
+	for (var i = 0; i < this.excludes.length; i++) {
+		if (name.match(this.excludes[i])) {
+			return true;
+		}
+	}
+	return false;
+};
 
-exports.observe = function observe(dir) {
-	var watchers = {},
-		watched = {},
-		observer = new Observer({
-			watchers: watchers,
-			watched: watched
-		});
+Observer.prototype._createHandler = function _createHandler(dir) {
+	var self = this;
 
-	watchers[dir] = fs.watch(dir, createHandler(dir, observer));
+	if (!dir) {
+		throw new TypeError('a valid directory is required');
+	}
 
-	fs.readdir(dir, function (err, list) {
-		if (err) {
-			error(format('Error reading "%s"', dir));
+	return function (evt, name) {
+		var eventType;
+
+		name = path.join(dir, name);
+
+		if (self._isExcluded(name)) {
 			return;
 		}
 
-		list.forEach(function (path) {
-			path = dir + '/' + path;
-			fs.stat(path, function (err, stat) {
+		if (evt === 'change') {
+			self.emit('modify', name);
+		} else {
+			fs.stat(name, function (err, stat) {
 				if (err) {
-					error(format('Error accessing "%s"', path));
-					return;
-				}
-
-				if (stat && stat.isDirectory()) {
-					observe(path);
+					if (self.watchers[name]) {
+						self.watchers[name].close();
+						delete self.watchers[name];
+					}
+					delete self.watching[name];
+					self.emit('remove', name);
+				} else {
+					if (stat.isDirectory() && !self.watchers[name]) {
+						self.watchers[name] = fs.watch(name, self._createHandler(name));
+					}
+					if (self.watching[name]) {
+						self.emit('modify', name);
+					} else {
+						self.watching[name] = true;
+						self.emit('add', name);
+					}
 				}
 			});
-		});
-	});
+		}
+	};
+};
 
-	return observer;
+
+exports.Observer = Observer;
+
+exports.observe = function observe(dir, options) {
+	var observer = new Observer(options);
+	return observer.observe(dir);
 };
